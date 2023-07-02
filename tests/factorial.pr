@@ -1,0 +1,13 @@
+int factorial_recursive(int number) {
+    if number <= 0 then { \\ single line comment that should be ignored
+        return 0;
+    }
+    if number == 1 then {
+        return 1; 
+        \\\ multi-line comment 
+        that should also be ignored
+        ///
+    } else {
+        return number * factorial_recursive(number - 1);
+    }
+}
