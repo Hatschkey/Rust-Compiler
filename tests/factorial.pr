@@ -11,3 +11,4 @@ int factorial_recursive(int number) {
         return number * factorial_recursive(number - 1);
     }
 }
+\\ End comment

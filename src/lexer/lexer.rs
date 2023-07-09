@@ -1,3 +1,4 @@
+use super::lexerror::LexerError;
 use super::token::Token;
 use super::token::TokenValue;
 
@@ -21,9 +22,13 @@ pub struct Lexer {
     col: usize,
 }
 
+fn as_byte_vec(token: &str) -> Vec<u8> {
+    return token.bytes().map(|c| c as u8).collect();
+}
+
 impl Lexer {
     pub fn new(input: &str) -> Self {
-        let mut input: Vec<u8> = input.bytes().map(|c| c as u8).collect();
+        let mut input: Vec<u8> = as_byte_vec(input);
         input.push(b'\0');
         let character = input[0];
         let peeked_character = either!(input.len() > 1 => input[1]; b'\0');
@@ -33,33 +38,43 @@ impl Lexer {
             prev_character: b'\0',
             character,
             peeked_character,
-            line: 0,
+            line: 1,
             col: 0,
         }
     }
 
-    fn advance(&mut self) {
-        if self.read_position >= self.input.len() {
-            // TODO: Fix this with proper error handling?
-            panic!("Reached EOF while reading a token");
-        } else {
-            self.prev_character =
-                either!(self.read_position > 1 => self.input[self.read_position - 1]; b'\0');
-            self.character = self.input[self.read_position];
-            self.peeked_character = either!(self.read_position + 1 < self.input.len() => self.input[self.read_position + 1]; b'\0');
-            self.read_position += 1;
-            self.col += 1;
-        }
+    fn advance(&mut self, times: usize) {
+        for _ in 1..=times {
+            if self.read_position >= self.input.len() {
+                self.character = b'\0';
+            } else {
+                self.prev_character =
+                    either!(self.read_position > 1 => self.input[self.read_position - 1]; b'\0');
+                self.character = self.input[self.read_position];
+                self.peeked_character = either!(self.read_position + 1 < self.input.len() => self.input[self.read_position + 1]; b'\0');
+                self.read_position += 1;
+                self.col += 1;
+            }
 
-        if self.character == b'\n' {
-            self.line += 1;
-            self.col = 0;
+            if self.character == b'\n' {
+                self.line += 1;
+                self.col = 0;
+            }
+        }
+    }
+
+    fn advance_and_push(&mut self, token: &mut Vec<u8>, times: usize) {
+        for _ in 1..=times {
+            self.advance(1);
+            if self.character != b'\0' && self.character != b'\n' {
+                token.push(self.character);
+            }
         }
     }
 
     fn skip_spaces(&mut self) {
         while self.character.is_ascii_whitespace() {
-            self.advance();
+            self.advance(1);
         }
     }
 
@@ -71,8 +86,7 @@ impl Lexer {
             || self.peeked_character == b'_'
             || self.peeked_character == b'.'
         {
-            self.advance();
-            identifier.push(self.character);
+            self.advance_and_push(&mut identifier, 1);
         }
         return identifier;
     }
@@ -80,20 +94,28 @@ impl Lexer {
     fn make_number(&mut self) -> Token {
         let mut number_literal = Vec::<u8>::new();
         let mut number_kind = TokenValue::Int;
+        let start_line = self.line;
+        let start_col = self.col;
         number_literal.push(self.character);
 
         while self.peeked_character.is_ascii_digit() {
-            self.advance();
-            number_literal.push(self.character);
+            self.advance_and_push(&mut number_literal, 1);
         }
 
         if self.peeked_character == b'.' {
-            self.advance();
-            number_literal.push(self.character);
             number_kind = TokenValue::Real;
+            self.advance_and_push(&mut number_literal, 1);
+
             while self.peeked_character.is_ascii_digit() {
-                self.advance();
-                number_literal.push(self.character);
+                self.advance_and_push(&mut number_literal, 1);
+            }
+
+            if !self.character.is_ascii_digit() {
+                return Token::make_error(as_byte_vec(
+                    LexerError::UnterminatedReal
+                        .format_message(start_line, start_col, number_literal)
+                        .as_str(),
+                ));
             }
         }
 
@@ -102,63 +124,114 @@ impl Lexer {
 
     fn make_char(&mut self) -> Token {
         let mut char_literal = Vec::<u8>::new();
-        char_literal.push(self.character);
-        self.advance();
+        let start_line = self.line;
+        let start_col = self.col;
 
-        if self.character != b'\\' && self.character != b'\'' {
-            char_literal.push(self.character);
-            self.advance();
-        } else if Token::is_valid_escape_character(self.peeked_character) {
-            char_literal.push(self.character);
-            self.advance();
-            char_literal.push(self.character);
-            self.advance()
+        char_literal.push(self.character);
+        match self.peeked_character {
+            b'\\' => self.advance_and_push(&mut char_literal, 3),
+            b'\0' => self.advance(1),
+            _ => self.advance_and_push(&mut char_literal, 1),
+        };
+
+        if self.character != b'\0' && self.peeked_character == b'\'' {
+            self.advance_and_push(&mut char_literal, 1);
         }
 
         if self.character == b'\'' {
-            char_literal.push(self.character);
-        } else {
-            return Token::make_error(char_literal);
+            return Token::make_literal(char_literal, TokenValue::Char);
         }
-        return Token::make_literal(char_literal, TokenValue::Char);
+
+        while self.peeked_character != b'\0' && self.peeked_character != b'\'' {
+            self.advance_and_push(&mut char_literal, 1);
+        }
+
+        match self.peeked_character {
+            b'\0' => Token::make_error(as_byte_vec(
+                LexerError::UnterminatedChar
+                    .format_message(start_line, start_col, char_literal)
+                    .as_str(),
+            )),
+            _ => {
+                self.advance_and_push(&mut char_literal, 1);
+                if self.prev_character == b'\0' {
+                    Token::make_error(as_byte_vec(
+                        LexerError::MalformedChar
+                            .format_message(start_line, start_col, char_literal)
+                            .as_str(),
+                    ))
+                } else {
+                    Token::make_error(as_byte_vec(
+                        LexerError::TooBigChar
+                            .format_message(start_line, start_col, char_literal)
+                            .as_str(),
+                    ))
+                }
+            }
+        }
     }
 
     fn make_string(&mut self) -> Token {
         let mut string_literal = Vec::<u8>::new();
+        let start_line = self.line;
+        let start_col = self.col;
         string_literal.push(self.character);
 
-        while self.peeked_character != b'"' || self.character == b'\\' {
-            self.advance();
-            string_literal.push(self.character);
+        while self.peeked_character != b'\n'
+            && self.peeked_character != b'\0'
+            && (self.peeked_character != b'"' || self.character == b'\\')
+        {
+            self.advance_and_push(&mut string_literal, 1);
         }
-        self.advance();
-        string_literal.push(self.character);
+        self.advance_and_push(&mut string_literal, 1);
 
-        return Token::make_literal(string_literal, TokenValue::String);
+        match self.character {
+            b'\n' | b'\0' => Token::make_error(as_byte_vec(
+                LexerError::UnterminatedString
+                    .format_message(start_line, start_col, string_literal)
+                    .as_str(),
+            )),
+            _ => Token::make_literal(string_literal, TokenValue::String),
+        }
     }
 
     fn ignore_comment(&mut self) -> Token {
-        if self.peeked_character != b'\\' {
-            panic!("Invalid token '\\'");
-        }
+        let start_line = self.line;
+        let start_col = self.col;
+        self.advance(1);
 
-        self.advance();
-        if self.peeked_character == b'\\' {
-            while self.prev_character != b'/'
-                || self.character != b'/'
-                || self.peeked_character != b'/'
-            {
-                self.advance();
+        match self.character {
+            b'\\' => {
+                if self.peeked_character != b'\\' {
+                    while self.character != b'\n' && self.character != b'\0' {
+                        self.advance(1);
+                    }
+                } else {
+                    while self.peeked_character != b'\0'
+                        && (self.prev_character != b'/'
+                            || self.character != b'/'
+                            || self.peeked_character != b'/')
+                    {
+                        self.advance(1);
+                    }
+                    if self.peeked_character != b'\0' {
+                        self.advance(2);
+                    } else {
+                        return Token::make_error(as_byte_vec(
+                            LexerError::UnterminatedComment
+                                .format_message(start_line, start_col, vec![])
+                                .as_str(),
+                        ));
+                    }
+                }
+                return self.read_token();
             }
-            self.advance();
-            self.advance();
-        } else {
-            while self.character != b'\n' && self.character != b'\0' {
-                self.advance();
-            }
+            _ => Token::make_error(as_byte_vec(
+                LexerError::InvalidCharacter
+                    .format_message(self.line, self.col, vec![self.prev_character as u8])
+                    .as_str(),
+            )),
         }
-
-        return self.read_token();
     }
 
     fn read_token(&mut self) -> Token {
@@ -202,23 +275,27 @@ impl Lexer {
                 either!(self.peeked_character.is_ascii_digit() => self.make_number(); Token::make_operator(TokenValue::Minus))
             }
             b'<' => Token::make_operator(
-                either!(self.peeked_character == b'=' => {self.advance(); TokenValue::LessOrEqual}; TokenValue::LessThan),
+                either!(self.peeked_character == b'=' => {self.advance(1); TokenValue::LessOrEqual}; TokenValue::LessThan),
             ),
             b'>' => Token::make_operator(
-                either!(self.peeked_character == b'=' => {self.advance(); TokenValue::GreaterOrEqual}; TokenValue::GreaterThan),
+                either!(self.peeked_character == b'=' => {self.advance(1); TokenValue::GreaterOrEqual}; TokenValue::GreaterThan),
             ),
             b'!' => Token::make_operator(
-                either!(self.peeked_character == b'=' => {self.advance(); TokenValue::Differs}; TokenValue::Bang),
+                either!(self.peeked_character == b'=' => {self.advance(1); TokenValue::Differs}; TokenValue::Bang),
             ),
             b'=' => Token::make_operator(
-                either!(self.peeked_character == b'=' => {self.advance(); TokenValue::Equals}; TokenValue::Assign),
+                either!(self.peeked_character == b'=' => {self.advance(1); TokenValue::Equals}; TokenValue::Assign),
             ),
             b'+' => Token::make_operator(TokenValue::Plus),
             b'*' => Token::make_operator(TokenValue::Star),
             b'%' => Token::make_operator(TokenValue::Percent),
             b'|' => Token::make_operator(TokenValue::VBar),
             b'~' => Token::make_operator(TokenValue::Tilde),
-            _ => panic!("Unrecognized token: {}", self.character as char),
+            _ => Token::make_error(as_byte_vec(
+                LexerError::InvalidCharacter
+                    .format_message(self.line, self.col, vec![self.character as u8])
+                    .as_str(),
+            )),
         }
     }
 
@@ -227,9 +304,8 @@ impl Lexer {
         let mut last_token = Token::make_soi();
         while !last_token.is_eof() {
             tokens.push(last_token);
-            self.advance();
+            self.advance(1);
             last_token = self.read_token();
-            println!("Last token: {:?}", last_token);
         }
         tokens.push(last_token);
         return tokens;
@@ -239,10 +315,6 @@ impl Lexer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn as_byte_vec(token: &str) -> Vec<u8> {
-        return token.bytes().map(|c| c as u8).collect();
-    }
 
     #[test]
     fn should_create_empty_program() {
@@ -487,9 +559,32 @@ mod tests {
     }
 
     #[test]
+    fn should_ignore_comments() {
+        let mut lexer = Lexer::new("\\\\\\multiline comment///");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![Token::make_soi(), Token::make_eof()];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
     fn should_read_full_program() {
-        let source = std::fs::read_to_string("tests/factorial.pr").expect("File did not exist");
-        let mut lexer = Lexer::new(&source);
+        let mut lexer = Lexer::new(
+            "
+            int factorial_recursive(int number) {
+                if number <= 0 then { \\\\ single line comment that should be ignored
+                    return 0;
+                }
+                if number == 1 then {
+                    return 1; 
+                    \\\\\\ multi-line comment 
+                    that should also be ignored
+                    ///
+                } else {
+                    return number * factorial_recursive(number - 1);
+                }
+            }
+            \\\\ End comment",
+        );
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
@@ -534,6 +629,172 @@ mod tests {
             Token::make_special(TokenValue::SemiColon),
             Token::make_special(TokenValue::CloseCurlyBracket),
             Token::make_special(TokenValue::CloseCurlyBracket),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_invalid_token() {
+        let mut lexer = Lexer::new("int ten = 10;\n$");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Int),
+            Token::make_identifier(as_byte_vec("ten")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_literal(as_byte_vec("10"), TokenValue::Int),
+            Token::make_special(TokenValue::SemiColon),
+            Token::make_error(as_byte_vec("(At l: 2, c: 1): Invalid token: $")),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_big_char() {
+        let mut lexer = Lexer::new("char big = 'ab';\nchar bigger = 'ab\ncd';");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("big")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec("(At l: 1, c: 12): Char literal too big: 'ab'")),
+            Token::make_special(TokenValue::SemiColon),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("bigger")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 2, c: 15): Char literal too big: 'abcd'",
+            )),
+            Token::make_special(TokenValue::SemiColon),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_unterm_char() {
+        let mut lexer = Lexer::new("char unterm = 'b");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("unterm")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 1, c: 15): Unterminated char literal: 'b",
+            )),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_unstarted_char() {
+        let mut lexer = Lexer::new("char unterm = '");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("unterm")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 1, c: 15): Unterminated char literal: '",
+            )),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_unterm_escaped_char() {
+        let mut lexer = Lexer::new("char unterm = '\\'");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("unterm")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 1, c: 15): Unterminated char literal: '\\'",
+            )),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_malformed_escape_char() {
+        let mut lexer = Lexer::new("char malformed = '\0'");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("malformed")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec("(At l: 1, c: 18): Malformed char literal: ''")),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_unterm_string() {
+        let mut lexer = Lexer::new(
+            "string unterm = \"unterminated strin\nstring unterm2 = \"another unterminated strin",
+        );
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::String),
+            Token::make_identifier(as_byte_vec("unterm")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 1, c: 17): Unterminated string literal: \"unterminated strin",
+            )),
+            Token::make_special(TokenValue::String),
+            Token::make_identifier(as_byte_vec("unterm2")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 2, c: 18): Unterminated string literal: \"another unterminated strin",
+            )),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_unterm_comment() {
+        let mut lexer = Lexer::new("char x; \\\\\\ unterminated\nmultiline\ncomme");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Char),
+            Token::make_identifier(as_byte_vec("x")),
+            Token::make_special(TokenValue::SemiColon),
+            Token::make_error(as_byte_vec(
+                "(At l: 1, c: 9): Unterminated multi-line comment",
+            )),
+            Token::make_eof(),
+        ];
+        assert!(actual_tokens == expected_tokens);
+    }
+
+    #[test]
+    fn should_error_on_unterm_real() {
+        let mut lexer = Lexer::new("real x = 12.;");
+        let actual_tokens = lexer.tokenize();
+        let expected_tokens = vec![
+            Token::make_soi(),
+            Token::make_special(TokenValue::Real),
+            Token::make_identifier(as_byte_vec("x")),
+            Token::make_operator(TokenValue::Assign),
+            Token::make_error(as_byte_vec(
+                "(At l: 1, c: 10): Unterminated real literal: 12.",
+            )),
+            Token::make_special(TokenValue::SemiColon),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);

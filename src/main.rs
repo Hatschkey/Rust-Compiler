@@ -1,11 +1,23 @@
 mod lexer;
-use std::fs;
+use std::{env, fs};
 
 use lexer::Lexer;
 
 fn main() {
-    let source_code = fs::read_to_string("test/test.pr").expect("File did not exist");
-    let mut lexer = Lexer::new(&source_code);
-    let token_steam = lexer.tokenize();
-    println!("{:?}", token_steam);
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        panic!("Please specify source file name");
+    }
+
+    // Read source
+    let source_code = fs::read_to_string(&args[1]).expect("File not found");
+
+    // Tokenize
+    let token_stream = Lexer::new(&source_code).tokenize();
+
+    // Debug
+    println!("{}", source_code);
+    for token in token_stream {
+        println!("{}", token.to_string());
+    }
 }

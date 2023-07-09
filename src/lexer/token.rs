@@ -1,4 +1,4 @@
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenValue {
     Char,
     Int,
@@ -41,7 +41,7 @@ pub enum TokenValue {
     EOF,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
     Literal,
     Identifier,
@@ -52,7 +52,7 @@ pub enum TokenKind {
     EOF,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     token: Option<Vec<u8>>,
     token_value: TokenValue,
@@ -60,6 +60,18 @@ pub struct Token {
 }
 
 impl Token {
+    pub fn to_string(&self) -> String {
+        return format!(
+            "Token: [{:?}, {:?}: {}]",
+            self.token_value,
+            self.token_type,
+            if self.token.is_some() {
+                String::from_utf8(self.token.to_owned().unwrap()).unwrap()
+            } else {
+                String::new()
+            }
+        );
+    }
 
     pub fn is_eof(&mut self) -> bool {
         self.token_value == TokenValue::EOF
@@ -113,18 +125,11 @@ impl Token {
         }
     }
 
-    pub fn make_error(token: Vec<u8>) -> Token {
+    pub fn make_error(error_message: Vec<u8>) -> Token {
         Token {
-            token: Option::Some(token),
+            token: Option::Some(error_message),
             token_value: TokenValue::Error,
             token_type: TokenKind::Error,
-        }
-    }
-
-    pub fn is_valid_escape_character(character: u8) -> bool {
-        match character {
-            b'a'..=b'z' | b'A'..=b'Z' | b'\\' | b'\'' | b'"' | b'0' => true,
-            _ => false,
         }
     }
 }
