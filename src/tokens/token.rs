@@ -1,10 +1,15 @@
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Hash, Clone, Debug, Eq, PartialEq)]
 pub enum TokenValue {
     Char,
     Int,
     Real,
     Bool,
     String,
+    CharLit,
+    IntLit,
+    RealLit,
+    BoolLit,
+    StringLit,
     If,
     Then,
     Else,
@@ -29,6 +34,7 @@ pub enum TokenValue {
     LessThan,
     GreaterThan,
     VBar,
+    Ampersand,
     Tilde,
     LessOrEqual,
     GreaterOrEqual,
@@ -41,7 +47,7 @@ pub enum TokenValue {
     EOF,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Hash, Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
     Literal,
     Identifier,
@@ -52,7 +58,7 @@ pub enum TokenKind {
     EOF,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Hash, Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     token: Option<Vec<u8>>,
     token_value: TokenValue,

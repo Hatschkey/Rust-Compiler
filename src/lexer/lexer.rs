@@ -1,6 +1,5 @@
 use super::lexerror::LexerError;
-use super::token::Token;
-use super::token::TokenValue;
+use crate::tokens::{Token, TokenValue};
 
 macro_rules! either {
     ($x:expr => $true_expr:expr; $false_expr:expr) => {
@@ -93,7 +92,7 @@ impl Lexer {
 
     fn make_number(&mut self) -> Token {
         let mut number_literal = Vec::<u8>::new();
-        let mut number_kind = TokenValue::Int;
+        let mut number_kind = TokenValue::IntLit;
         let start_line = self.line;
         let start_col = self.col;
         number_literal.push(self.character);
@@ -103,7 +102,7 @@ impl Lexer {
         }
 
         if self.peeked_character == b'.' {
-            number_kind = TokenValue::Real;
+            number_kind = TokenValue::RealLit;
             self.advance_and_push(&mut number_literal, 1);
 
             while self.peeked_character.is_ascii_digit() {
@@ -139,7 +138,7 @@ impl Lexer {
         }
 
         if self.character == b'\'' {
-            return Token::make_literal(char_literal, TokenValue::Char);
+            return Token::make_literal(char_literal, TokenValue::CharLit);
         }
 
         while self.peeked_character != b'\0' && self.peeked_character != b'\'' {
@@ -191,7 +190,7 @@ impl Lexer {
                     .format_message(start_line, start_col, string_literal)
                     .as_str(),
             )),
-            _ => Token::make_literal(string_literal, TokenValue::String),
+            _ => Token::make_literal(string_literal, TokenValue::StringLit),
         }
     }
 
@@ -267,7 +266,7 @@ impl Lexer {
                     b"input" => Token::make_special(TokenValue::Input),
                     b"output" => Token::make_special(TokenValue::Output),
                     b"return" => Token::make_special(TokenValue::Return),
-                    b"true" | b"false" => Token::make_literal(identifier, TokenValue::Bool),
+                    b"true" | b"false" => Token::make_literal(identifier, TokenValue::BoolLit),
                     _ => Token::make_identifier(identifier),
                 }
             }
@@ -291,6 +290,7 @@ impl Lexer {
             b'%' => Token::make_operator(TokenValue::Percent),
             b'|' => Token::make_operator(TokenValue::VBar),
             b'~' => Token::make_operator(TokenValue::Tilde),
+            b'&' => Token::make_operator(TokenValue::Ampersand),
             _ => Token::make_error(as_byte_vec(
                 LexerError::InvalidCharacter
                     .format_message(self.line, self.col, vec![self.character as u8])
@@ -330,7 +330,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("420"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("420"), TokenValue::IntLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -342,7 +342,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("-69"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("-69"), TokenValue::IntLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -354,7 +354,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("123.45"), TokenValue::Real),
+            Token::make_literal(as_byte_vec("123.45"), TokenValue::RealLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -366,7 +366,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("-1.23"), TokenValue::Real),
+            Token::make_literal(as_byte_vec("-1.23"), TokenValue::RealLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -378,7 +378,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("'a'"), TokenValue::Char),
+            Token::make_literal(as_byte_vec("'a'"), TokenValue::CharLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -390,7 +390,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("'\\''"), TokenValue::Char),
+            Token::make_literal(as_byte_vec("'\\''"), TokenValue::CharLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -402,7 +402,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("''"), TokenValue::Char),
+            Token::make_literal(as_byte_vec("''"), TokenValue::CharLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -414,7 +414,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("\"a string literal\""), TokenValue::String),
+            Token::make_literal(as_byte_vec("\"a string literal\""), TokenValue::StringLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -428,7 +428,7 @@ mod tests {
             Token::make_soi(),
             Token::make_literal(
                 as_byte_vec("\"a string literal with escaped \\\" quotes \\\"\""),
-                TokenValue::String,
+                TokenValue::StringLit,
             ),
             Token::make_eof(),
         ];
@@ -443,7 +443,7 @@ mod tests {
             Token::make_soi(),
             Token::make_literal(
                 as_byte_vec("\"a string literal with escaped \\\\n newline\""),
-                TokenValue::String,
+                TokenValue::StringLit,
             ),
             Token::make_eof(),
         ];
@@ -456,7 +456,7 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("\"\""), TokenValue::String),
+            Token::make_literal(as_byte_vec("\"\""), TokenValue::StringLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -468,8 +468,8 @@ mod tests {
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
-            Token::make_literal(as_byte_vec("true"), TokenValue::Bool),
-            Token::make_literal(as_byte_vec("false"), TokenValue::Bool),
+            Token::make_literal(as_byte_vec("true"), TokenValue::BoolLit),
+            Token::make_literal(as_byte_vec("false"), TokenValue::BoolLit),
             Token::make_eof(),
         ];
         assert!(actual_tokens == expected_tokens);
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn should_read_operators() {
-        let mut lexer = Lexer::new("=+-*%<>|~<= >= == ! !=");
+        let mut lexer = Lexer::new("=+-*%<>|~&<= >= == ! !=");
         let actual_tokens = lexer.tokenize();
         let expected_tokens = vec![
             Token::make_soi(),
@@ -534,6 +534,7 @@ mod tests {
             Token::make_operator(TokenValue::GreaterThan),
             Token::make_operator(TokenValue::VBar),
             Token::make_operator(TokenValue::Tilde),
+            Token::make_operator(TokenValue::Ampersand),
             Token::make_operator(TokenValue::LessOrEqual),
             Token::make_operator(TokenValue::GreaterOrEqual),
             Token::make_operator(TokenValue::Equals),
@@ -598,21 +599,21 @@ mod tests {
             Token::make_special(TokenValue::If),
             Token::make_identifier(as_byte_vec("number")),
             Token::make_operator(TokenValue::LessOrEqual),
-            Token::make_literal(as_byte_vec("0"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("0"), TokenValue::IntLit),
             Token::make_special(TokenValue::Then),
             Token::make_special(TokenValue::OpenCurlyBracket),
             Token::make_special(TokenValue::Return),
-            Token::make_literal(as_byte_vec("0"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("0"), TokenValue::IntLit),
             Token::make_special(TokenValue::SemiColon),
             Token::make_special(TokenValue::CloseCurlyBracket),
             Token::make_special(TokenValue::If),
             Token::make_identifier(as_byte_vec("number")),
             Token::make_operator(TokenValue::Equals),
-            Token::make_literal(as_byte_vec("1"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("1"), TokenValue::IntLit),
             Token::make_special(TokenValue::Then),
             Token::make_special(TokenValue::OpenCurlyBracket),
             Token::make_special(TokenValue::Return),
-            Token::make_literal(as_byte_vec("1"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("1"), TokenValue::IntLit),
             Token::make_special(TokenValue::SemiColon),
             Token::make_special(TokenValue::CloseCurlyBracket),
             Token::make_special(TokenValue::Else),
@@ -624,7 +625,7 @@ mod tests {
             Token::make_special(TokenValue::OpenParenthesis),
             Token::make_identifier(as_byte_vec("number")),
             Token::make_operator(TokenValue::Minus),
-            Token::make_literal(as_byte_vec("1"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("1"), TokenValue::IntLit),
             Token::make_special(TokenValue::CloseParenthesis),
             Token::make_special(TokenValue::SemiColon),
             Token::make_special(TokenValue::CloseCurlyBracket),
@@ -643,7 +644,7 @@ mod tests {
             Token::make_special(TokenValue::Int),
             Token::make_identifier(as_byte_vec("ten")),
             Token::make_operator(TokenValue::Assign),
-            Token::make_literal(as_byte_vec("10"), TokenValue::Int),
+            Token::make_literal(as_byte_vec("10"), TokenValue::IntLit),
             Token::make_special(TokenValue::SemiColon),
             Token::make_error(as_byte_vec("(At l: 2, c: 1): Invalid token: $")),
             Token::make_eof(),

@@ -1,7 +1,10 @@
 mod lexer;
+mod parser;
+mod tokens;
 use std::{env, fs};
 
 use lexer::Lexer;
+use parser::Parser;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,9 +18,5 @@ fn main() {
     // Tokenize
     let token_stream = Lexer::new(&source_code).tokenize();
 
-    // Debug
-    println!("{}", source_code);
-    for token in token_stream {
-        println!("{}", token.to_string());
-    }
+    let _program_context = Parser::new(token_stream).parse();
 }
